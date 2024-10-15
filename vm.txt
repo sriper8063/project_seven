@@ -1,0 +1,46 @@
+# Define variables
+$resourceGroupName = "myResourceGroup"
+$location = "EastUS"
+$vmName = "myVM"
+$vmSize = "Standard_DS1_v2"
+$adminUser = "azureUser"
+$adminPassword = ConvertTo-SecureString "P@ssw0rd1234!" -AsPlainText -Force
+
+# Authenticate with Azure account (interactive login)
+Connect-AzAccount
+
+# Create a new resource group
+New-AzResourceGroup -Name $resourceGroupName -Location $location
+
+# Create a new virtual network and subnet
+$vnet = New-AzVirtualNetwork -ResourceGroupName $resourceGroupName -Location $location `
+    -Name "myVnet" -AddressPrefix "10.0.0.0/16"
+Add-AzVirtualNetworkSubnetConfig -Name "mySubnet" -AddressPrefix "10.0.1.0/24" -VirtualNetwork $vnet
+$vnet | Set-AzVirtualNetwork
+
+# Create a new public IP address
+$publicIp = New-AzPublicIpAddress -ResourceGroupName $resourceGroupName -Location $location `
+    -AllocationMethod Dynamic -Name "myPublicIp"
+
+# Create a new network security group with an RDP rule
+$nsgRuleRDP = New-AzNetworkSecurityRuleConfig -Name "myRdpRule" -Description "Allow RDP" `
+    -Access Allow -Protocol Tcp -Direction Inbound -Priority 1000 -SourceAddressPrefix "*" `
+    -SourcePortRange "*" -DestinationAddressPrefix "*" -DestinationPortRange 3389
+$nsg = New-AzNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Location $location `
+    -Name "myNetworkSecurityGroup" -SecurityRules $nsgRuleRDP
+
+# Create a new NIC and associate it with the public IP and NSG
+$nic = New-AzNetworkInterface -Name "myNic" -ResourceGroupName $resourceGroupName `
+    -Location $location -SubnetId $vnet.Subnets[0].Id -PublicIpAddressId $publicIp.Id `
+    -NetworkSecurityGroupId $nsg.Id
+
+# Define VM configuration
+$vmConfig = New-AzVMConfig -VMName $vmName -VMSize $vmSize | `
+    Set-AzVMOperatingSystem -Windows -ComputerName $vmName -Credential (New-Object System.Management.Automation.PSCredential ($adminUser, $adminPassword)) | `
+    Set-AzVMSourceImage -PublisherName "MicrosoftWindowsServer" -Offer "WindowsServer" `
+    -Skus "2019-Datacenter" -Version "latest" | `
+    Add-AzVMNetworkInterface -Id $nic.Id
+
+# Create the VM
+New-AzVM -ResourceGroupName $resourceGroupName -Location $location -VM $vmConfig
+
