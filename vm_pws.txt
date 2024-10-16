@@ -1,0 +1,48 @@
+# Variables
+$resourceGroupName = 'practice'
+$location = 'East US'
+$vmName = 'myVM'
+$adminUsername = 'azureuser'
+$adminPassword = ConvertTo-SecureString 'YourPasswordHere!' -AsPlainText -Force
+
+# Create Resource Group
+New-AzResourceGroup -Name $resourceGroupName -Location $location
+
+# Create Virtual Network
+$subnetConfig = New-AzVirtualNetworkSubnetConfig -Name 'mySubnet' -AddressPrefix '10.0.0.0/24'
+$vnet = New-AzVirtualNetwork -ResourceGroupName $resourceGroupName -Location $location -Name 'myVnet' -AddressPrefix '10.0.0.0/16' -Subnet $subnetConfig
+
+# Create Public IP Address with Static Allocation
+$publicIp = New-AzPublicIpAddress -ResourceGroupName $resourceGroupName -Name 'myPublicIpAddress' -Location $location -AllocationMethod Static -Sku Standard
+
+# Create Network Security Group
+$nsgRuleRDP = New-AzNetworkSecurityRuleConfig -Name 'Allow-RDP' -Protocol Tcp -Direction Inbound -Priority 1000 -SourceAddressPrefix '*' -SourcePortRange '*' -DestinationAddressPrefix '*' -DestinationPortRange 3389 -Access Allow
+$nsg = New-AzNetworkSecurityGroup -ResourceGroupName $resourceGroupName -Location $location -Name 'myNetworkSecurityGroup' -SecurityRules $nsgRuleRDP
+
+# Create Network Interface
+$nic = New-AzNetworkInterface -ResourceGroupName $resourceGroupName -Location $location -Name 'myNic' -SubnetId $vnet.Subnets[0].Id -PublicIpAddressId $publicIp.Id -NetworkSecurityGroupId $nsg.Id
+
+# Create Virtual Machine Configuration
+$vmConfig = New-AzVMConfig -VMName $vmName -VMSize 'Standard_DS1_v2'
+
+# Set Operating System and Credentials for the VM
+$vmConfig = Set-AzVMOperatingSystem -VM $vmConfig `
+    -Windows `
+    -ComputerName $vmName `
+    -Credential (New-Object System.Management.Automation.PSCredential($adminUsername, $adminPassword)) `
+    -ProvisionVMAgent `
+    -EnableAutoUpdate
+
+# Add the Network Interface to the VM Configuration
+$vmConfig = Add-AzVMNetworkInterface -VM $vmConfig -Id $nic.Id
+
+# Enable Boot Diagnostics with Managed Storage Account
+$bootDiagnostics = New-AzVMBootDiagnosticsConfig `
+    -Enabled $true `
+    -StorageUri "https://<yourstorageaccountname>.blob.core.windows.net/" # Replace with your storage account URI if using custom storage
+
+# Assign Boot Diagnostics to VM Configuration
+$vmConfig.DiagnosticsProfile.BootDiagnostics = $bootDiagnostics
+
+# Create the VM without specifying zones, if not needed
+New-AzVM -ResourceGroupName $resourceGroupName -Location $location -VM $vmConfig
